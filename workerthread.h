@@ -23,9 +23,9 @@ public:
 private:
 	void startThread();
 private:
-	std::condition_variable itemInQueue;
-	std::mutex mutex;
-	std::unique_ptr<std::thread> thread;
-	std::list<std::function<void()>> tasks;
-	volatile bool isRunning;
+	std::condition_variable m_itemInQueue;
+	std::mutex m_mutex; // to avoid race condtions
+	std::unique_ptr<std::thread> m_thread; // Hold a thread
+	std::list<std::function<void()>> m_tasks;
+	volatile bool m_isRunning;
 };

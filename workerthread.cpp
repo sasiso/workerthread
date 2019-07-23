@@ -1,11 +1,12 @@
 #include "workerthread.h"
 
 
-WorkerThread::WorkerThread() :isRunning(false)
+WorkerThread::WorkerThread() :m_isRunning(false)
 {
-	thread.reset(new std::thread([this]
+	// Start the thread
+	m_thread.reset(new std::thread([this]
 	{
-		isRunning = true;
+		m_isRunning = true;
 		this->startThread();
 	}));
 }
@@ -17,35 +18,34 @@ WorkerThread::~WorkerThread()
 
 void WorkerThread::startThread()
 {
-	std::unique_lock<std::mutex> l(mutex);
-
+	std::unique_lock<std::mutex> l(m_mutex);
 	do
 	{
-		while (isRunning && tasks.empty())
-			itemInQueue.wait(l);
+		while (m_isRunning && m_tasks.empty())
+			m_itemInQueue.wait(l); // wait on mutex to unless a task is added
 
-		while (!tasks.empty())
+		while (!m_tasks.empty())
 		{
-			auto size = tasks.size();
-			printf("Number of pending task are %d\n", size);
-			const std::function<void()> t = tasks.front();
-			tasks.pop_front();
-			l.unlock();
+			auto size = m_tasks.size();
+			printf("Number of pending task are %ld\n", size);
+			const std::function<void()> t = m_tasks.front();
+			m_tasks.pop_front();
+			l.unlock(); // Let other task be queued until we compete this task
 			t();
 			l.lock();
 		}
-		itemInQueue.notify_all();
+		m_itemInQueue.notify_all();
 
 
-	} while (isRunning);
-	itemInQueue.notify_all();
+	} while (m_isRunning);
+	m_itemInQueue.notify_all();
 }
 
 void WorkerThread::doAsync(const std::function<void()>& t)
 {
-	std::lock_guard<std::mutex> _(mutex);
-	tasks.push_back(t);
-	itemInQueue.notify_one();
+	std::lock_guard<std::mutex> _(m_mutex);
+	m_tasks.push_back(t);
+	m_itemInQueue.notify_one();
 
 }
 
@@ -54,17 +54,17 @@ void WorkerThread::doSync(const std::function<void()>& t)
 	std::condition_variable event;
 	bool finished = false;
 
-	std::unique_lock<std::mutex> l(mutex);
+	std::unique_lock<std::mutex> l(m_mutex);
 	auto lambda = [this, &t, &finished, &event]
 	{
 		t();
-		std::lock_guard<std::mutex> l(mutex);
+		std::lock_guard<std::mutex> l(m_mutex);
 
 		finished = true;
 		event.notify_one();
 	};
-	tasks.push_back(lambda);
-	itemInQueue.notify_one();
+	m_tasks.push_back(lambda);
+	m_itemInQueue.notify_one();
 
 	while (!finished)
 		event.wait(l);
@@ -73,17 +73,17 @@ void WorkerThread::doSync(const std::function<void()>& t)
 
 void WorkerThread::wait()
 {
-	std::unique_lock<std::mutex> l(mutex);
-	while (!tasks.empty())
-		itemInQueue.wait(l);
+	std::unique_lock<std::mutex> l(m_mutex);
+	while (!m_tasks.empty())
+		m_itemInQueue.wait(l);
 }
 
 void WorkerThread::stop()
 {
 	{
-		std::lock_guard<std::mutex> l(mutex);
-		isRunning = false;
-		itemInQueue.notify_one();
+		std::lock_guard<std::mutex> l(m_mutex);
+		m_isRunning = false;
+		m_itemInQueue.notify_one();
 	}
-	thread->join();
+	m_thread->join();
 }
